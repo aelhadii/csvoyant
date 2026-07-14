@@ -19,23 +19,8 @@ services:
       retries: 10
       start_period: 10s
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.8
-    ports:
-      - "8123:8123"
-      - "9000:9000"
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    volumes:
-      - chdata:/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
+  # NOTE: ClickHouse is a managed ClickHouse Cloud cluster (external), not a compose service.
+  # Set CLICKHOUSE_URL / CLICKHOUSE_USER / CLICKHOUSE_PASSWORD / CLICKHOUSE_DATABASE in .env.
 
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -63,7 +48,6 @@ services:
       - "8080:8080"
     depends_on:
       postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
@@ -83,7 +67,6 @@ services:
       - "8081:8081"
     depends_on:
       postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
@@ -115,5 +98,4 @@ services:
 
 volumes:
   pgdata:
-  chdata:
   rabbitmqdata:
