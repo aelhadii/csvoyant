@@ -1,20 +1,15 @@
 //! CSVoyant API — Axum HTTP server.
 //!
-//! Prompt A scope: a runnable skeleton. It loads config, initializes telemetry, connects to
-//! Postgres / ClickHouse / RabbitMQ, and exposes liveness (`/health`) and readiness (`/ready`)
-//! endpoints. Business logic (auth, jobs, dashboards) lands in later prompts.
+//! Thin binary shell: loads config, initializes telemetry, connects downstreams, and serves
+//! the router. Handlers and state live in the `api` library crate so tests can reuse them.
 
-mod state;
-
-use std::time::Duration;
-
+use api::auth;
+use api::state::AppState;
 use axum::Router;
 use axum::routing::get;
 use shared::Config;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-
-use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .merge(auth::auth_router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -69,6 +65,3 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
     info!("shutdown signal received");
 }
-
-/// A short timeout applied to each readiness probe so `/ready` can't hang.
-pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(3);

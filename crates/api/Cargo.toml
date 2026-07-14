@@ -26,4 +26,17 @@ sqlx.workspace = true
 lapin.workspace = true
 clickhouse.workspace = true
 reqwest.workspace = true
+argon2.workspace = true
+jsonwebtoken.workspace = true
+validator.workspace = true
+axum-extra.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+time.workspace = true
 dotenvy = "0.15"
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+serde_json.workspace = true

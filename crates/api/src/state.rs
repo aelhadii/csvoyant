@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use axum::extract::FromRef;
 use lapin::{Connection, ConnectionProperties};
 use shared::Config;
 use sqlx::PgPool;
@@ -9,6 +10,7 @@ use sqlx::postgres::PgPoolOptions;
 use tracing::warn;
 
 use crate::PROBE_TIMEOUT;
+use crate::auth::{AuthState, JwtConfig};
 
 /// Cloneable handle carried by every request (Axum `State`).
 #[derive(Clone)]
@@ -16,6 +18,13 @@ pub struct AppState {
     pub pg: PgPool,
     pub clickhouse: clickhouse::Client,
     pub amqp: Arc<Connection>,
+    pub auth: AuthState,
+}
+
+impl FromRef<AppState> for AuthState {
+    fn from_ref(state: &AppState) -> Self {
+        state.auth.clone()
+    }
 }
 
 impl AppState {
@@ -27,6 +36,10 @@ impl AppState {
             .connect(&config.database_url)
             .await?;
 
+        // Apply pending migrations on startup so the schema is always current.
+        sqlx::migrate!("./migrations").run(&pg).await?;
+        tracing::info!("database migrations applied");
+
         let clickhouse = clickhouse::Client::default()
             .with_url(&config.clickhouse_url)
             .with_user(&config.clickhouse_user)
@@ -36,10 +49,16 @@ impl AppState {
         let amqp =
             Arc::new(Connection::connect(&config.amqp_url, ConnectionProperties::default()).await?);
 
+        let auth = AuthState {
+            pg: pg.clone(),
+            jwt: JwtConfig::new(config.jwt_secret.clone()),
+        };
+
         Ok(Self {
             pg,
             clickhouse,
             amqp,
+            auth,
         })
     }
 

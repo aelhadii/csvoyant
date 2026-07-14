@@ -4,6 +4,30 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 
 ## [Unreleased]
 
+### Prompt B — Auth system (#2)
+
+**Added**
+- JWT auth against Postgres (sqlx): `POST /auth/register`, `POST /auth/login`,
+  `POST /auth/refresh`, `PATCH /auth/email`, plus `GET /auth/me` and an Admin-only
+  `GET /admin/ping` that exercises the RBAC guard.
+- Access tokens (HS256, 15 min) + opaque rotating refresh tokens (7 days, SHA-256-hashed at
+  rest, revoke-on-use). Refresh accepted via JSON body or the httpOnly `refresh_token` cookie.
+- `argon2` password hashing; case-insensitive unique emails.
+- `AuthUser` / `AdminUser` Axum extractors for authentication + role-based authorization.
+- Request validation (`validator`) and consistent structured errors
+  (`{ "error": { "code", "message" } }`).
+- Migrations `0001_users` + `0002_refresh_tokens`, applied automatically on API startup.
+- Tests: 8 unit (password/jwt/tokens) + 7 integration (`#[sqlx::test]`, isolated DB) covering
+  register/login/refresh-rotation/change-email/validation/conflict and an RBAC test proving a
+  User cannot reach an Admin route.
+
+**Hardening (from code review)**
+- Refresh rotation is a single atomic `UPDATE … WHERE revoked=false RETURNING user_id`, so a
+  token can't be double-spent under concurrent redemption.
+- Login verifies against a dummy hash when the email is unknown, equalizing timing to prevent
+  account enumeration.
+- `change_email` returns 401 (not 500) if the token's user no longer exists.
+
 ### Fixed — Docker glibc mismatch
 
 - Pinned the Rust builder image to `rust:1.97-bookworm`. The default `rust:1.97` tag is
