@@ -28,6 +28,15 @@ impl Role {
             Role::Admin => "admin",
         }
     }
+
+    /// Parse a role from its persisted string form.
+    pub fn parse(s: &str) -> Option<Role> {
+        match s {
+            "user" => Some(Role::User),
+            "admin" => Some(Role::Admin),
+            _ => None,
+        }
+    }
 }
 
 /// The lifecycle of an ingestion job. Transitions are linear until a terminal state:
