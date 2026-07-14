@@ -4,6 +4,14 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 
 ## [Unreleased]
 
+### Fixed — Docker glibc mismatch
+
+- Pinned the Rust builder image to `rust:1.97-bookworm`. The default `rust:1.97` tag is
+  Debian trixie (glibc 2.38+), while the runtime is `debian:bookworm-slim` (glibc 2.36), so
+  the compiled binaries died at startup with `version 'GLIBC_2.38' not found`. Matching the
+  builder to the runtime resolves it. Verified: full stack builds and all services report
+  healthy (`api`/`worker` boot cleanly).
+
 ### Changed — use managed ClickHouse Cloud
 
 - Removed the `clickhouse` service from docker-compose; the platform now targets a managed
