@@ -44,10 +44,12 @@ impl AppState {
     }
 
     /// Probe every dependency; returns `(name, healthy)` pairs for the `/ready` response.
+    /// The two async probes run concurrently so `/ready` latency is the max, not the sum.
     pub async fn readiness(&self) -> Vec<(&'static str, bool)> {
+        let (pg, ch) = tokio::join!(self.check_postgres(), self.check_clickhouse());
         vec![
-            ("postgres", self.check_postgres().await),
-            ("clickhouse", self.check_clickhouse().await),
+            ("postgres", pg),
+            ("clickhouse", ch),
             ("rabbitmq", self.check_rabbitmq()),
         ]
     }

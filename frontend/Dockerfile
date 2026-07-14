@@ -6,6 +6,9 @@ COPY package.json package-lock.json* ./
 # Use a clean install when a lockfile exists; fall back to install otherwise.
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .
+# NEXT_PUBLIC_* must be present at BUILD time to be inlined into the client bundle.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 FROM node:22-slim AS runtime
