@@ -2,7 +2,9 @@
 # or `BIN=worker`. Uses the full `rust` image so C toolchain deps (for rustls/ring, etc.) are
 # present without extra apt installs.
 
-FROM rust:1.97 AS builder
+# Pin the builder to bookworm so its glibc matches the debian:bookworm-slim runtime below.
+# (The default `rust:1.97` tag is trixie-based → glibc 2.38+, which bookworm-slim lacks.)
+FROM rust:1.97-bookworm AS builder
 WORKDIR /app
 
 # Copy the whole workspace and build the requested binary in release mode.
