@@ -4,6 +4,15 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 
 ## [Unreleased]
 
+### Changed — use managed ClickHouse Cloud
+
+- Removed the `clickhouse` service from docker-compose; the platform now targets a managed
+  **ClickHouse Cloud** cluster (external). Connect over HTTPS on port 8443 via
+  `CLICKHOUSE_URL`/`CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD`/`CLICKHOUSE_DATABASE` in `.env`.
+- Enabled the `rustls-tls` feature on the `clickhouse` crate so the Rust client speaks HTTPS
+  (CA roots via webpki). No application code changes — the client already reads these env vars.
+- Dropped `clickhouse` from the `api`/`worker` `depends_on` and removed the `chdata` volume.
+
 ### Prompt A — Repo scaffold & infra (#1)
 
 **Added**

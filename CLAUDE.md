@@ -22,7 +22,7 @@ See `docs/` for the source of truth:
 | Worker | Rust binary (same cargo workspace), `lapin` AMQP client |
 | Queue | RabbitMQ (durable, dead-letter, retry-with-backoff) |
 | App DB | PostgreSQL (users, jobs, dashboards) |
-| Analytics DB | ClickHouse (ingested CSV data, one table per job) |
+| Analytics DB | **ClickHouse Cloud** (managed, external — not in compose; HTTPS :8443, Rust client `rustls-tls`) — ingested CSV data, one table per job |
 | Observability | OpenTelemetry → Axiom (traces/logs/metrics) |
 | Frontend | Next.js (App Router) + TypeScript + shadcn/ui + Tailwind |
 
