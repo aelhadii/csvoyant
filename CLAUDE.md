@@ -67,7 +67,7 @@ Shared vocabulary across code, tests, docs, and commits:
 
 | Prompt | Scope | Status |
 |--------|-------|--------|
-| A | Repo scaffold & infra | in progress |
+| A | Repo scaffold & infra | implemented (PR open) |
 | B | Auth system | not started |
 | C | Ingestion pipeline | not started |
 | D | Dashboard + read APIs | not started |
