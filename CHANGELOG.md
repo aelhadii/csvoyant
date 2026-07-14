@@ -21,6 +21,13 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
   register/login/refresh-rotation/change-email/validation/conflict and an RBAC test proving a
   User cannot reach an Admin route.
 
+**Hardening (from code review)**
+- Refresh rotation is a single atomic `UPDATE … WHERE revoked=false RETURNING user_id`, so a
+  token can't be double-spent under concurrent redemption.
+- Login verifies against a dummy hash when the email is unknown, equalizing timing to prevent
+  account enumeration.
+- `change_email` returns 401 (not 500) if the token's user no longer exists.
+
 ### Fixed — Docker glibc mismatch
 
 - Pinned the Rust builder image to `rust:1.97-bookworm`. The default `rust:1.97` tag is

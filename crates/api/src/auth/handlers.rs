@@ -18,6 +18,12 @@ use crate::error::{ApiResult, AppError};
 
 const USER_COLUMNS: &str = "id, email, password_hash, role";
 
+/// A valid argon2 hash verified against when the user is missing, so login takes the same time
+/// whether or not the email exists (defeats account-enumeration by timing).
+static DUMMY_PASSWORD_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    password::hash_password("timing-equalizer-not-a-real-password").expect("hash dummy password")
+});
+
 /// POST /auth/register — create a user and issue a token pair.
 pub async fn register(
     State(auth): State<AuthState>,
@@ -55,9 +61,17 @@ pub async fn login(
     .fetch_optional(&auth.pg)
     .await?;
 
-    // Same error whether the user is missing or the password is wrong (no enumeration).
+    // Same error and same timing whether the user is missing or the password is wrong: when
+    // there's no user, still run a verify against a dummy hash so the response time matches.
+    let verified = match &row {
+        Some(r) => password::verify_password(&req.password, &r.password_hash),
+        None => {
+            let _ = password::verify_password(&req.password, &DUMMY_PASSWORD_HASH);
+            false
+        }
+    };
     let row = match row {
-        Some(r) if password::verify_password(&req.password, &r.password_hash) => r,
+        Some(r) if verified => r,
         _ => return Err(AppError::Unauthorized("invalid credentials".into())),
     };
 
@@ -79,23 +93,21 @@ pub async fn refresh(
 
     let token_hash = tokens::hash_token(&presented);
 
-    // A valid token is present, not revoked, and not expired.
-    let found = sqlx::query_as::<_, (Uuid, Uuid)>(
-        "SELECT id, user_id FROM refresh_tokens \
-         WHERE token_hash = $1 AND revoked = false AND expires_at > now()",
+    // Atomically find-and-revoke: the conditional UPDATE flips revoked false→true for a valid,
+    // unexpired token and RETURNs its owner. Only one of N concurrent redemptions can win, so a
+    // refresh token can never be spent twice (no rotation race / double-spend).
+    let rotated = sqlx::query_as::<_, (Uuid,)>(
+        "UPDATE refresh_tokens SET revoked = true \
+         WHERE token_hash = $1 AND revoked = false AND expires_at > now() \
+         RETURNING user_id",
     )
     .bind(&token_hash)
     .fetch_optional(&auth.pg)
     .await?;
 
-    let (token_id, user_id) =
-        found.ok_or_else(|| AppError::Unauthorized("invalid or expired refresh token".into()))?;
-
-    // Rotation: revoke the presented token so it can't be reused.
-    sqlx::query("UPDATE refresh_tokens SET revoked = true WHERE id = $1")
-        .bind(token_id)
-        .execute(&auth.pg)
-        .await?;
+    let user_id = rotated
+        .map(|(uid,)| uid)
+        .ok_or_else(|| AppError::Unauthorized("invalid or expired refresh token".into()))?;
 
     let user =
         sqlx::query_as::<_, UserRow>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
@@ -118,8 +130,9 @@ pub async fn change_email(
     let current =
         sqlx::query_as::<_, UserRow>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
             .bind(user.user_id)
-            .fetch_one(&auth.pg)
-            .await?;
+            .fetch_optional(&auth.pg)
+            .await?
+            .ok_or_else(|| AppError::Unauthorized("user no longer exists".into()))?;
 
     if !password::verify_password(&req.current_password, &current.password_hash) {
         return Err(AppError::Unauthorized("invalid credentials".into()));
