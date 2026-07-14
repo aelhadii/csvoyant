@@ -1,0 +1,28 @@
+# Rust
+/target
+**/target
+
+# Env / secrets
+.env
+.env.local
+*.local
+
+# Node / Next.js
+node_modules
+.next
+out
+dist
+.pnpm-store
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+*.swp
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Docker / data volumes
+/data
+*.log
