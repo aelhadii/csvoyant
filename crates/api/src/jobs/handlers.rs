@@ -1,5 +1,6 @@
 //! Job endpoint handlers.
 
+use std::net::IpAddr;
 use std::time::Duration;
 
 use axum::Json;
@@ -115,8 +116,33 @@ async fn validate_source_url(raw: &str) -> ApiResult<()> {
         ));
     }
 
+    // SSRF guard: resolve the host and reject private/loopback/link-local addresses so a user
+    // can't make us (or ClickHouse) fetch internal services or cloud metadata. (Best-effort:
+    // does not defend against DNS rebinding between this check and the actual fetch.)
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| AppError::BadRequest("URL has no host".to_string()))?;
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| AppError::BadRequest("URL host could not be resolved".to_string()))?;
+    let mut resolved_any = false;
+    for addr in addrs {
+        resolved_any = true;
+        if is_blocked_ip(addr.ip()) {
+            return Err(AppError::BadRequest(
+                "URL resolves to a disallowed (private/loopback) address".to_string(),
+            ));
+        }
+    }
+    if !resolved_any {
+        return Err(AppError::BadRequest(
+            "URL host could not be resolved".to_string(),
+        ));
+    }
+
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| AppError::Internal(e.into()))?;
 
@@ -169,4 +195,25 @@ async fn validate_source_url(raw: &str) -> ApiResult<()> {
     }
 
     Ok(())
+}
+
+/// Whether an IP is in a range we refuse to fetch (private, loopback, link-local, etc.).
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.octets()[0] == 0
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique-local  fc00::/7
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local    fe80::/10
+                || v6.to_ipv4_mapped().is_some_and(|m| is_blocked_ip(IpAddr::V4(m)))
+        }
+    }
 }

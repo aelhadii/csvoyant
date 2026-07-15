@@ -49,14 +49,6 @@ async fn main() -> anyhow::Result<()> {
     shared::amqp::declare_topology(&channel).await?;
     info!("worker connected to rabbitmq; topology declared");
 
-    // Consume in the background; the main task serves health checks.
-    let consumer_ctx = ctx.clone();
-    tokio::spawn(async move {
-        if let Err(e) = consumer::run(channel, consumer_ctx).await {
-            tracing::error!(error = ?e, "consumer loop stopped");
-        }
-    });
-
     let health_addr: SocketAddr = std::env::var("WORKER_HEALTH_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:8081".to_string())
         .parse()?;
@@ -67,9 +59,19 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(health_addr).await?;
     info!(addr = %health_addr, "worker health endpoint listening");
 
-    axum::serve(listener, health_app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // Run the consumer and the health server together. If the consumer loop ever stops, exit
+    // with an error so the orchestrator restarts us — otherwise the worker would keep reporting
+    // healthy while silently processing nothing.
+    let consumer_ctx = ctx.clone();
+    tokio::select! {
+        result = consumer::run(channel, consumer_ctx) => {
+            tracing::error!(consumer_result = ?result, "consumer loop stopped; exiting for restart");
+            anyhow::bail!("consumer loop stopped");
+        }
+        result = axum::serve(listener, health_app).with_graceful_shutdown(shutdown_signal()) => {
+            result?;
+        }
+    }
 
     Ok(())
 }

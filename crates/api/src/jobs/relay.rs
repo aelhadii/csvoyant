@@ -27,6 +27,8 @@ pub struct Relay {
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const BATCH_SIZE: i64 = 50;
+/// Bound each publish so a stuck broker can't hold the outbox row locks / DB txn open forever.
+const PUBLISH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Run forever: drain the outbox, then wait for a nudge or the poll interval.
 pub async fn run(relay: Relay) {
@@ -70,17 +72,22 @@ async fn dispatch_batch(relay: &Relay) -> anyhow::Result<usize> {
     let mut published = 0;
     for (id, queue, payload) in &rows {
         let bytes = serde_json::to_vec(payload).expect("outbox payload serializes");
-        match publisher::publish_raw(&relay.channel, queue, &bytes).await {
-            Ok(()) => {
+        let result = tokio::time::timeout(
+            PUBLISH_TIMEOUT,
+            publisher::publish_raw(&relay.channel, queue, &bytes),
+        )
+        .await;
+        match result {
+            Ok(Ok(())) => {
                 sqlx::query("UPDATE outbox SET published_at = now() WHERE id = $1")
                     .bind(id)
                     .execute(&mut *tx)
                     .await?;
                 published += 1;
             }
-            Err(e) => {
-                // Leave published_at NULL so the row is retried next pass.
-                warn!(error = ?e, outbox_id = %id, "failed to publish outbox row; retrying later");
+            other => {
+                // Publish failed or timed out. Leave published_at NULL so the row is retried.
+                warn!(result = ?other, outbox_id = %id, "failed to publish outbox row; retrying later");
                 sqlx::query("UPDATE outbox SET attempts = attempts + 1 WHERE id = $1")
                     .bind(id)
                     .execute(&mut *tx)

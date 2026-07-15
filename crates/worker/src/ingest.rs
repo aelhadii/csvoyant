@@ -2,7 +2,10 @@
 //! `url()` table function (DECISIONS #13) — ClickHouse fetches, parses, infers, and loads.
 
 use serde::Deserialize;
-use shared::{DATA_RETENTION_DAYS, INGEST_TIMEOUT_SECS, JobMessage, JobStatus, dataset_table_name};
+use shared::{
+    DATA_RETENTION_DAYS, INGEST_TIMEOUT_SECS, INGEST_TIMESTAMP_COLUMN, JobMessage, JobStatus,
+    dataset_table_name,
+};
 use sqlx::PgPool;
 use tracing::{Instrument, info, info_span};
 
@@ -125,10 +128,11 @@ fn build_create_table(table: &str, columns: &[DescribedColumn]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "CREATE TABLE IF NOT EXISTS `{table}` ({cols}, `_ingested_at` DateTime DEFAULT now()) \
+        "CREATE TABLE IF NOT EXISTS `{table}` ({cols}, `{ts}` DateTime DEFAULT now()) \
          ENGINE = MergeTree ORDER BY tuple() \
-         TTL `_ingested_at` + INTERVAL {DATA_RETENTION_DAYS} DAY",
+         TTL `{ts}` + INTERVAL {DATA_RETENTION_DAYS} DAY",
         table = escape_ident(table),
+        ts = INGEST_TIMESTAMP_COLUMN,
     )
 }
 
@@ -200,7 +204,9 @@ mod tests {
     #[test]
     fn create_table_has_ttl_and_ingest_timestamp() {
         let ddl = build_create_table("u1_j2", &cols());
-        assert!(ddl.contains("`_ingested_at` DateTime DEFAULT now()"));
+        assert!(ddl.contains(&format!(
+            "`{INGEST_TIMESTAMP_COLUMN}` DateTime DEFAULT now()"
+        )));
         assert!(ddl.contains(&format!("INTERVAL {DATA_RETENTION_DAYS} DAY")));
         assert!(ddl.contains("`id` Int64"));
         assert!(ddl.contains("`price` Nullable(Float64)"));

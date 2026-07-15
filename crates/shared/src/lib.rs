@@ -26,3 +26,6 @@ pub const INGEST_TIMEOUT_SECS: u64 = 120;
 pub const MAX_ATTEMPTS: u32 = 3;
 /// Days ingested data is retained in ClickHouse before TTL expiry (DECISIONS: 7 days).
 pub const DATA_RETENTION_DAYS: u32 = 7;
+/// Synthetic column added to every dataset table to carry the ingestion time + TTL. Namespaced
+/// so it won't collide with a user's CSV column; read endpoints should exclude it.
+pub const INGEST_TIMESTAMP_COLUMN: &str = "_csvoyant_ingested_at";
