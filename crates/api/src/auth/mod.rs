@@ -58,6 +58,7 @@ where
         .route("/auth/register", post(handlers::register))
         .route("/auth/login", post(handlers::login))
         .route("/auth/refresh", post(handlers::refresh))
+        .route("/auth/logout", post(handlers::logout))
         .route("/auth/email", patch(handlers::change_email))
         .route("/auth/me", get(handlers::me))
         // Admin-only probe route, used to exercise the RBAC guard.

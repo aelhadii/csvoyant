@@ -60,8 +60,8 @@ export function SiteHeader() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  signOut();
+                onClick={async () => {
+                  await signOut();
                   router.push("/login");
                 }}
               >

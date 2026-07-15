@@ -100,7 +100,7 @@ export function DataTable({ jobId, columns }: { jobId: string; columns: ColumnMe
             <TableBody>
               {data && data.rows.length > 0 ? (
                 data.rows.map((row, i) => (
-                  <TableRow key={i}>
+                  <TableRow key={`${data.page}-${i}`}>
                     {columns.map((c) => (
                       <TableCell key={c.name} className="whitespace-nowrap tabular-nums">
                         {row[c.name] === null || row[c.name] === undefined

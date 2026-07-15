@@ -200,6 +200,48 @@ async fn refresh_rotates_and_old_token_is_revoked(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn logout_revokes_the_refresh_token_so_the_session_cannot_be_restored(pool: PgPool) {
+    let app = app(pool);
+    let (_, reg) = call(
+        &app,
+        "POST",
+        "/auth/register",
+        Some(creds("out@x.com")),
+        None,
+    )
+    .await;
+    let refresh = reg["data"]["refresh_token"].as_str().unwrap().to_string();
+
+    let (ok, _) = call(
+        &app,
+        "POST",
+        "/auth/logout",
+        Some(json!({ "refresh_token": refresh })),
+        None,
+    )
+    .await;
+    assert_eq!(ok, StatusCode::OK);
+
+    // The whole point: the token must no longer buy a new session.
+    let (reused, _) = call(
+        &app,
+        "POST",
+        "/auth/refresh",
+        Some(json!({ "refresh_token": refresh })),
+        None,
+    )
+    .await;
+    assert_eq!(reused, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test]
+async fn logout_is_idempotent_and_succeeds_without_a_token(pool: PgPool) {
+    let app = app(pool);
+    let (status, _) = call(&app, "POST", "/auth/logout", Some(json!({})), None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[sqlx::test]
 async fn change_email_requires_current_password_and_updates_login(pool: PgPool) {
     let app = app(pool);
     let (_, reg) = call(

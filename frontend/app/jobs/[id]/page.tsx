@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 
 /** Rows pulled once to derive histogram / time-series buckets client-side. */
 const CHART_SAMPLE = 500;
+/** Re-poll cadence while the job is still in flight. */
+const POLL_MS = 2000;
 
 export default function JobDashboardPage() {
   const { user, loading: authLoading } = useRequireAuth();
@@ -37,16 +39,19 @@ export default function JobDashboardPage() {
   const [sampled, setSampled] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Follow the job until it settles — a dashboard only exists once it's ready.
+  // Follow the job until it settles, then stop. Self-scheduling (rather than setInterval) so
+  // reaching a terminal state genuinely ends the polling instead of re-arming it.
   useEffect(() => {
     if (!user || !id) return;
     let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function tick() {
       try {
         const j = await getJob(id);
         if (stop) return;
         setJob(j);
+
         if (j.status === "ready") {
           const [d, page] = await Promise.all([
             getDashboard(id),
@@ -57,6 +62,9 @@ export default function JobDashboardPage() {
           setSample(page.rows);
           setSampled(page.total > page.rows.length);
         }
+
+        // Nothing more will change once terminal — don't schedule another poll.
+        if (!stop && !isTerminal(j.status)) timer = setTimeout(tick, POLL_MS);
       } catch (err) {
         if (!stop) {
           setError(err instanceof ApiException ? err.error.message : "Could not load this job.");
@@ -65,17 +73,11 @@ export default function JobDashboardPage() {
     }
 
     void tick();
-    const t = setInterval(() => {
-      // Stop polling once terminal; the effect re-runs when `job` changes.
-      void tick();
-    }, 2000);
     return () => {
       stop = true;
-      clearInterval(t);
+      if (timer) clearTimeout(timer);
     };
-    // Re-subscribing on every job change would restart the interval; key on status instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, id, job?.status && isTerminal(job.status)]);
+  }, [user, id]);
 
   if (authLoading || !user) return <PageSkeleton />;
 

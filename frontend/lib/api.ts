@@ -113,8 +113,7 @@ async function unwrap<T>(res: Response): Promise<T> {
   return body?.data as T;
 }
 
-/** Exchange the refresh cookie for a new access token. Returns false if not signed in. */
-export async function refresh(): Promise<boolean> {
+async function doRefresh(): Promise<boolean> {
   try {
     const res = await fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
@@ -130,6 +129,37 @@ export async function refresh(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+let inFlightRefresh: Promise<boolean> | null = null;
+
+/**
+ * Exchange the refresh cookie for a new access token. Returns false if not signed in.
+ *
+ * Single-flight on purpose: refresh tokens rotate and are revoked on use, so two concurrent
+ * calls would race and exactly one would win — the loser's request would fail even though the
+ * session is healthy. Concurrent callers share one rotation instead.
+ */
+export function refresh(): Promise<boolean> {
+  inFlightRefresh ??= doRefresh().finally(() => {
+    inFlightRefresh = null;
+  });
+  return inFlightRefresh;
+}
+
+/** End the session: revoke the refresh token server-side and clear the cookie. */
+export async function logout(): Promise<void> {
+  try {
+    await fetch(`${API_URL}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+  } catch {
+    /* best-effort — we clear local state regardless */
+  }
+  setAccessToken(null);
 }
 
 /** Call the API; on 401 rotate the token once and replay. */

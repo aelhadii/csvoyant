@@ -25,7 +25,7 @@ type AuthContextValue = {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   setUser: (u: User | null) => void;
 };
 
@@ -66,9 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await apiClient.me());
   }, []);
 
-  const signOut = useCallback(() => {
-    // Drop the in-memory token; the refresh cookie expires on its own TTL.
-    setAccessToken(null);
+  const signOut = useCallback(async () => {
+    // Must revoke server-side: clearing only the in-memory token would leave the refresh cookie
+    // valid, and the next page load would silently restore the session.
+    await apiClient.logout();
     setUser(null);
   }, []);
 

@@ -47,12 +47,24 @@ export default function AdminPage() {
       }
     }
     void load();
-    const t = setInterval(load, 3000);
     return () => {
       stop = true;
-      clearInterval(t);
     };
   }, [user]);
+
+  // Poll only while something is actually moving — a settled list needs no refresh.
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    if (!jobs?.some((j) => !isTerminal(j.status))) return;
+    const t = setInterval(async () => {
+      try {
+        setJobs(await listJobs());
+      } catch {
+        /* transient; the next tick retries */
+      }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [user, jobs]);
 
   if (loading || !user) return <Skeleton className="h-64 w-full" />;
 
