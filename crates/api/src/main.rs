@@ -4,6 +4,7 @@
 //! the router. Handlers and state live in the `api` library crate so tests can reuse them.
 
 use api::auth;
+use api::jobs;
 use api::state::AppState;
 use axum::Router;
 use axum::routing::get;
@@ -25,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/ready", get(ready))
         .merge(auth::auth_router())
+        .merge(jobs::jobs_router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

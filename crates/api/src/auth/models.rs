@@ -36,12 +36,12 @@ pub struct ChangeEmailRequest {
     pub current_password: String,
 }
 
-/// Issued token pair. `expires_in` is the access-token lifetime in seconds.
+/// Issued token pair. The access token is always used as `Authorization: Bearer <token>`;
+/// `expires_in` is its lifetime in seconds so clients can refresh proactively.
 #[derive(Debug, Serialize)]
 pub struct TokenResponse {
     pub access_token: String,
     pub refresh_token: String,
-    pub token_type: &'static str,
     pub expires_in: i64,
 }
 

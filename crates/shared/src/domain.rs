@@ -64,6 +64,19 @@ impl JobStatus {
         }
     }
 
+    /// Parse a status from its persisted string form.
+    pub fn parse(s: &str) -> Option<JobStatus> {
+        match s {
+            "queued" => Some(JobStatus::Queued),
+            "downloading" => Some(JobStatus::Downloading),
+            "inferring" => Some(JobStatus::Inferring),
+            "ingesting" => Some(JobStatus::Ingesting),
+            "ready" => Some(JobStatus::Ready),
+            "failed" => Some(JobStatus::Failed),
+            _ => None,
+        }
+    }
+
     /// Terminal states have no outgoing transitions.
     pub fn is_terminal(self) -> bool {
         matches!(self, JobStatus::Ready | JobStatus::Failed)

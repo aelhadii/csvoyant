@@ -4,6 +4,33 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 
 ## [Unreleased]
 
+### Prompt C — Ingestion pipeline (#3)
+
+**Added**
+- **API**: `POST /jobs` (validate URL scheme/reachability/content-type + best-effort
+  `Content-Length` size cap, persist a `queued` job, publish to RabbitMQ, return `{ job_id }`),
+  `GET /jobs` (own jobs; Admins see all), `GET /jobs/{id}` (status; cross-tenant → 404).
+- **Worker**: consumes RabbitMQ and ingests via ClickHouse Cloud's `url()` table function
+  (DECISIONS #13) — `DESCRIBE` for schema, `CREATE TABLE … TTL 7d`, `INSERT … SELECT * FROM
+  url(…)`, then `count()`. Drives the state machine `queued → downloading → inferring →
+  ingesting → ready|failed`, one OTel span per stage.
+- **Resilience**: retryable failures (ClickHouse unreachable) retry with exponential backoff up
+  to `MAX_ATTEMPTS`; permanent failures (bad URL, unparseable CSV, type mismatch) and exhausted
+  retries are dead-lettered to the DLQ with a clear user-facing `error`.
+- **Format auto-detection**: `url()` is called with no explicit format, so ClickHouse detects
+  CSV/TSV/Parquet/JSON and compression (`.xz`/`.gz`/`.zst`) from the URL (DECISIONS #13).
+- **Uniform response envelope**: every endpoint now returns `{ "data": …, "error": … }`
+  (`data` on success, `error` on failure). Dropped the redundant `token_type` from token
+  responses (kept `expires_in`).
+- **Transactional outbox**: `POST /jobs` writes the job row *and* an `outbox` row in one
+  transaction; a background relay (`FOR UPDATE SKIP LOCKED`, nudged on submit) publishes to
+  RabbitMQ — at-least-once delivery even if the API crashes mid-publish. The worker is
+  idempotent (skips already-`ready` jobs; `DROP+CREATE` so a redelivery re-ingests cleanly).
+- Migrations `0003_ingestion_jobs`, `0004_outbox`; `JobMessage` + AMQP topology in `shared`.
+- Tests: 6 worker unit tests (describe parsing incl. malformed → permanent, DDL/insert SQL
+  builders, SQL-injection escaping) + 3 ClickHouse error-mapping tests.
+
+
 ### Prompt B — Auth system (#2)
 
 **Added**

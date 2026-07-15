@@ -1,22 +1,32 @@
-//! Durable RabbitMQ topology for the ingestion pipeline.
-//!
-//! - `ingestion.jobs` — the main durable work queue, dead-lettered to the DLX on rejection.
-//! - `ingestion.dlx` — the dead-letter exchange (fanout).
-//! - `ingestion.jobs.dead` — the dead-letter queue bound to the DLX, where failed/retried
-//!   messages land for inspection and backoff retry (Prompt C wires the retry logic).
+//! AMQP topology and the ingestion job message, shared by the API (publisher) and worker
+//! (consumer) so both agree on the queue names and payload shape.
 
 use lapin::options::{ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions};
 use lapin::types::{AMQPValue, FieldTable};
 use lapin::{Channel, ExchangeKind};
-use shared::{DEAD_LETTER_EXCHANGE, DEAD_LETTER_QUEUE, INGESTION_QUEUE};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-pub async fn declare(channel: &Channel) -> anyhow::Result<()> {
+use crate::{DEAD_LETTER_EXCHANGE, DEAD_LETTER_QUEUE, INGESTION_QUEUE};
+
+/// The payload published for each ingestion job. `attempt` starts at 0 and increments on retry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobMessage {
+    pub job_id: Uuid,
+    pub user_id: Uuid,
+    pub source_url: String,
+    #[serde(default)]
+    pub attempt: u32,
+}
+
+/// Declare the durable ingestion topology (idempotent): the work queue (dead-lettered to the
+/// DLX) plus the dead-letter exchange and its queue. Safe to call from every service on startup.
+pub async fn declare_topology(channel: &Channel) -> Result<(), lapin::Error> {
     let durable = QueueDeclareOptions {
         durable: true,
         ..Default::default()
     };
 
-    // Dead-letter exchange (fanout) + its queue.
     channel
         .exchange_declare(
             DEAD_LETTER_EXCHANGE,
@@ -41,7 +51,6 @@ pub async fn declare(channel: &Channel) -> anyhow::Result<()> {
         )
         .await?;
 
-    // Main jobs queue, configured to dead-letter to the DLX.
     let mut args = FieldTable::default();
     args.insert(
         "x-dead-letter-exchange".into(),

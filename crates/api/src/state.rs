@@ -11,6 +11,7 @@ use tracing::warn;
 
 use crate::PROBE_TIMEOUT;
 use crate::auth::{AuthState, JwtConfig};
+use crate::jobs::JobsState;
 
 /// Cloneable handle carried by every request (Axum `State`).
 #[derive(Clone)]
@@ -19,11 +20,18 @@ pub struct AppState {
     pub clickhouse: clickhouse::Client,
     pub amqp: Arc<Connection>,
     pub auth: AuthState,
+    pub jobs: JobsState,
 }
 
 impl FromRef<AppState> for AuthState {
     fn from_ref(state: &AppState) -> Self {
         state.auth.clone()
+    }
+}
+
+impl FromRef<AppState> for JobsState {
+    fn from_ref(state: &AppState) -> Self {
+        state.jobs.clone()
     }
 }
 
@@ -49,9 +57,25 @@ impl AppState {
         let amqp =
             Arc::new(Connection::connect(&config.amqp_url, ConnectionProperties::default()).await?);
 
+        // A channel for the outbox relay; declare the topology so the queue exists before publishing.
+        let channel = amqp.create_channel().await?;
+        shared::amqp::declare_topology(&channel).await?;
+
+        // Spawn the transactional-outbox relay: it publishes queued outbox rows to RabbitMQ.
+        let relay_notify = std::sync::Arc::new(tokio::sync::Notify::new());
+        tokio::spawn(crate::jobs::relay::run(crate::jobs::relay::Relay {
+            pg: pg.clone(),
+            channel,
+            notify: relay_notify.clone(),
+        }));
+
         let auth = AuthState {
             pg: pg.clone(),
             jwt: JwtConfig::new(config.jwt_secret.clone()),
+        };
+        let jobs = JobsState {
+            pg: pg.clone(),
+            relay_notify,
         };
 
         Ok(Self {
@@ -59,6 +83,7 @@ impl AppState {
             clickhouse,
             amqp,
             auth,
+            jobs,
         })
     }
 

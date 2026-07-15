@@ -10,11 +10,13 @@ use validator::Validate;
 
 use crate::auth::guard::{AdminUser, AuthUser};
 use crate::auth::models::{
-    ChangeEmailRequest, LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserResponse,
-    UserRow,
+    ChangeEmailRequest, LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserRow,
 };
 use crate::auth::{AuthState, REFRESH_COOKIE, jwt, password, tokens};
 use crate::error::{ApiResult, AppError};
+use crate::response;
+
+type JsonValue = Json<serde_json::Value>;
 
 const USER_COLUMNS: &str = "id, email, password_hash, role";
 
@@ -29,7 +31,7 @@ pub async fn register(
     State(auth): State<AuthState>,
     jar: CookieJar,
     Json(req): Json<RegisterRequest>,
-) -> ApiResult<(StatusCode, CookieJar, Json<TokenResponse>)> {
+) -> ApiResult<(StatusCode, CookieJar, JsonValue)> {
     req.validate()?;
     let password_hash = password::hash_password(&req.password)?;
 
@@ -43,7 +45,7 @@ pub async fn register(
     .map_err(|e| unique_violation(e, "email already registered"))?;
 
     let (resp, jar) = issue_tokens(&auth, &row, jar).await?;
-    Ok((StatusCode::CREATED, jar, Json(resp)))
+    Ok((StatusCode::CREATED, jar, response::data(resp)))
 }
 
 /// POST /auth/login — verify credentials and issue a token pair.
@@ -51,7 +53,7 @@ pub async fn login(
     State(auth): State<AuthState>,
     jar: CookieJar,
     Json(req): Json<LoginRequest>,
-) -> ApiResult<(CookieJar, Json<TokenResponse>)> {
+) -> ApiResult<(CookieJar, JsonValue)> {
     req.validate()?;
 
     let row = sqlx::query_as::<_, UserRow>(&format!(
@@ -76,7 +78,7 @@ pub async fn login(
     };
 
     let (resp, jar) = issue_tokens(&auth, &row, jar).await?;
-    Ok((jar, Json(resp)))
+    Ok((jar, response::data(resp)))
 }
 
 /// POST /auth/refresh — rotate a refresh token: revoke the old, issue a new pair.
@@ -85,7 +87,7 @@ pub async fn refresh(
     State(auth): State<AuthState>,
     jar: CookieJar,
     body: Option<Json<RefreshRequest>>,
-) -> ApiResult<(CookieJar, Json<TokenResponse>)> {
+) -> ApiResult<(CookieJar, JsonValue)> {
     let presented = body
         .and_then(|Json(b)| b.refresh_token)
         .or_else(|| jar.get(REFRESH_COOKIE).map(|c| c.value().to_string()))
@@ -116,7 +118,7 @@ pub async fn refresh(
             .await?;
 
     let (resp, jar) = issue_tokens(&auth, &user, jar).await?;
-    Ok((jar, Json(resp)))
+    Ok((jar, response::data(resp)))
 }
 
 /// PATCH /auth/email — change the authenticated user's email (re-auth with current password).
@@ -124,7 +126,7 @@ pub async fn change_email(
     State(auth): State<AuthState>,
     user: AuthUser,
     Json(req): Json<ChangeEmailRequest>,
-) -> ApiResult<Json<UserResponse>> {
+) -> ApiResult<JsonValue> {
     req.validate()?;
 
     let current =
@@ -147,23 +149,23 @@ pub async fn change_email(
     .await
     .map_err(|e| unique_violation(e, "email already registered"))?;
 
-    Ok(Json(updated.into_response()))
+    Ok(response::data(updated.into_response()))
 }
 
 /// GET /auth/me — the authenticated user's profile.
-pub async fn me(State(auth): State<AuthState>, user: AuthUser) -> ApiResult<Json<UserResponse>> {
+pub async fn me(State(auth): State<AuthState>, user: AuthUser) -> ApiResult<JsonValue> {
     let row =
         sqlx::query_as::<_, UserRow>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
             .bind(user.user_id)
             .fetch_optional(&auth.pg)
             .await?
             .ok_or_else(|| AppError::NotFound("user not found".into()))?;
-    Ok(Json(row.into_response()))
+    Ok(response::data(row.into_response()))
 }
 
 /// GET /admin/ping — Admin-only; proves the RBAC guard rejects non-admins.
-pub async fn admin_ping(_admin: AdminUser) -> &'static str {
-    "pong"
+pub async fn admin_ping(_admin: AdminUser) -> JsonValue {
+    response::data(serde_json::json!({ "message": "pong" }))
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -196,7 +198,6 @@ async fn issue_tokens(
     let resp = TokenResponse {
         access_token,
         refresh_token,
-        token_type: "Bearer",
         expires_in: auth.jwt.access_ttl.num_seconds(),
     };
     Ok((resp, jar))

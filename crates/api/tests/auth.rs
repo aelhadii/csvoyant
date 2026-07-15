@@ -60,14 +60,14 @@ async fn register_returns_tokens_and_me_reflects_the_user(pool: PgPool) {
 
     let (status, body) = call(&app, "POST", "/auth/register", Some(creds("a@x.com")), None).await;
     assert_eq!(status, StatusCode::CREATED);
-    let access = body["access_token"].as_str().unwrap().to_string();
-    assert_eq!(body["token_type"], "Bearer");
-    assert!(body["refresh_token"].as_str().is_some());
+    let access = body["data"]["access_token"].as_str().unwrap().to_string();
+    assert!(body["data"]["refresh_token"].as_str().is_some());
+    assert!(body["error"].is_null());
 
     let (status, me) = call(&app, "GET", "/auth/me", None, Some(&access)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(me["email"], "a@x.com");
-    assert_eq!(me["role"], "user");
+    assert_eq!(me["data"]["email"], "a@x.com");
+    assert_eq!(me["data"]["role"], "user");
 }
 
 #[sqlx::test]
@@ -132,7 +132,7 @@ async fn login_succeeds_with_correct_password_and_fails_otherwise(pool: PgPool) 
 
     let (ok, body) = call(&app, "POST", "/auth/login", Some(creds("log@x.com")), None).await;
     assert_eq!(ok, StatusCode::OK);
-    assert!(body["access_token"].as_str().is_some());
+    assert!(body["data"]["access_token"].as_str().is_some());
 
     let (bad, body) = call(
         &app,
@@ -161,7 +161,7 @@ async fn login_succeeds_with_correct_password_and_fails_otherwise(pool: PgPool) 
 async fn refresh_rotates_and_old_token_is_revoked(pool: PgPool) {
     let app = app(pool);
     let (_, reg) = call(&app, "POST", "/auth/register", Some(creds("r@x.com")), None).await;
-    let refresh1 = reg["refresh_token"].as_str().unwrap().to_string();
+    let refresh1 = reg["data"]["refresh_token"].as_str().unwrap().to_string();
 
     // Exchange refresh1 for a new pair.
     let (status, body) = call(
@@ -173,7 +173,7 @@ async fn refresh_rotates_and_old_token_is_revoked(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let refresh2 = body["refresh_token"].as_str().unwrap().to_string();
+    let refresh2 = body["data"]["refresh_token"].as_str().unwrap().to_string();
     assert_ne!(refresh1, refresh2, "refresh token must rotate");
 
     // refresh1 is now revoked and must be rejected.
@@ -210,7 +210,7 @@ async fn change_email_requires_current_password_and_updates_login(pool: PgPool) 
         None,
     )
     .await;
-    let access = reg["access_token"].as_str().unwrap().to_string();
+    let access = reg["data"]["access_token"].as_str().unwrap().to_string();
 
     // Wrong current password → 401.
     let (bad, _) = call(
@@ -233,7 +233,7 @@ async fn change_email_requires_current_password_and_updates_login(pool: PgPool) 
     )
     .await;
     assert_eq!(ok, StatusCode::OK);
-    assert_eq!(body["email"], "new@x.com");
+    assert_eq!(body["data"]["email"], "new@x.com");
 
     // Login now works with the new email, not the old one.
     let (with_new, _) = call(&app, "POST", "/auth/login", Some(creds("new@x.com")), None).await;
@@ -252,7 +252,7 @@ async fn admin_route_enforces_rbac(pool: PgPool) {
 
     // A normal user is forbidden.
     let (_, reg) = call(&app, "POST", "/auth/register", Some(creds("u@x.com")), None).await;
-    let user_token = reg["access_token"].as_str().unwrap().to_string();
+    let user_token = reg["data"]["access_token"].as_str().unwrap().to_string();
     let (forbidden, body) = call(&app, "GET", "/admin/ping", None, Some(&user_token)).await;
     assert_eq!(forbidden, StatusCode::FORBIDDEN);
     assert_eq!(body["error"]["code"], "forbidden");
@@ -263,7 +263,7 @@ async fn admin_route_enforces_rbac(pool: PgPool) {
         .await
         .unwrap();
     let (_, login) = call(&app, "POST", "/auth/login", Some(creds("u@x.com")), None).await;
-    let admin_token = login["access_token"].as_str().unwrap().to_string();
+    let admin_token = login["data"]["access_token"].as_str().unwrap().to_string();
     let (ok, _) = call(&app, "GET", "/admin/ping", None, Some(&admin_token)).await;
     assert_eq!(ok, StatusCode::OK);
 }

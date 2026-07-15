@@ -27,9 +27,11 @@
 
 - **API (Axum)** — auth, request validation, RBAC guards, job creation, publishing to
   RabbitMQ, read endpoints for job status / dashboard config / table data. Owns Postgres.
-- **Worker (Rust)** — consumes RabbitMQ, streams the CSV download, infers schema, creates
-  the ClickHouse table, bulk-loads rows, drives the job state machine, generates dashboard
-  metadata on success. Writes ClickHouse + updates Postgres job rows.
+- **Worker (Rust)** — consumes RabbitMQ and orchestrates ingestion via ClickHouse Cloud's
+  `url()` table function (see DECISIONS #13): `DESCRIBE` for schema, `CREATE TABLE … TTL`, then
+  `INSERT … SELECT * FROM url(…)`. ClickHouse fetches, parses, infers, and loads server-side.
+  The worker drives the job state machine, adds per-stage OTel spans, retries/dead-letters on
+  failure, generates dashboard metadata on success, and updates Postgres job rows.
 - **PostgreSQL** — application state only (users, jobs, dashboards). *Not* the ingested data.
 - **ClickHouse** — the ingested CSV data; source for all dashboard aggregations.
 - **RabbitMQ** — durable job queue with a dead-letter exchange for failed/retried jobs.
@@ -72,11 +74,13 @@ CSV gets a schema that exactly matches its inferred columns. (See DECISIONS.)
 
 ## Schema inference
 
-1. Read the header row for column names (sanitize to valid ClickHouse identifiers).
-2. Sample the first N data rows.
-3. Per column, attempt to parse as `Int64 → Float64 → Bool → Date → DateTime → String`,
-   widening to `String` on any failure. Nullable if empty values are present.
-4. Emit the inferred schema as JSON, stored on the job and used to `CREATE TABLE`.
+Inference is delegated to ClickHouse (DECISIONS #13): the worker runs `DESCRIBE url(<source>)`
+with no explicit format, so ClickHouse auto-detects the format (CSV/TSV/Parquet/JSON) and
+compression from the URL, reads the header for column names, and samples rows to deduce types
+(`Int64`, `Float64`, `Bool`, `Date`, `DateTime`, `String`, wrapped in `Nullable(…)` when empties
+are present) — applied by the engine that will actually ingest the data (so inference and load
+never disagree). The resulting `{name, type}` list is stored as JSON on the job and used to
+`CREATE TABLE` (plus an `_ingested_at DateTime` column carrying the 7-day TTL).
 
 ## API surface (representative)
 
