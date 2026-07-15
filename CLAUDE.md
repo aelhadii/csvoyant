@@ -71,5 +71,5 @@ Shared vocabulary across code, tests, docs, and commits:
 | B | Auth system | done (merged #10) |
 | C | Ingestion pipeline | done (merged #11) |
 | D | Dashboard + read APIs | done (merged #12) |
-| E | Frontend | implemented (PR open) |
+| E | Frontend | done (merged #13) |
 | F | Cross-cutting (issues/PRs, CLAUDE.md, tests, OpenAPI, reviews) | ongoing |
