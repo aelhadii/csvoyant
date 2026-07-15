@@ -2,11 +2,13 @@
 //! (ubiquitous language), and telemetry initialization used by both the API and the worker.
 
 pub mod amqp;
+pub mod clickhouse;
 pub mod config;
 pub mod domain;
 pub mod telemetry;
 
 pub use amqp::JobMessage;
+pub use clickhouse::{ChError, ChHttp};
 pub use config::{Config, TelemetryConfig};
 pub use domain::{ColumnSchema, ColumnType, InferredSchema, JobStatus, Role, dataset_table_name};
 

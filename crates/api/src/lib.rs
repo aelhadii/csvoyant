@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod error;
+pub mod extract;
 pub mod jobs;
 pub mod response;
 pub mod state;

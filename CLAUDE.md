@@ -70,6 +70,6 @@ Shared vocabulary across code, tests, docs, and commits:
 | A | Repo scaffold & infra | done (merged #7) |
 | B | Auth system | done (merged #10) |
 | C | Ingestion pipeline | done (merged #11) |
-| D | Dashboard + read APIs | not started |
+| D | Dashboard + read APIs | implemented (PR open) |
 | E | Frontend | not started |
 | F | Cross-cutting (issues/PRs, CLAUDE.md, tests, OpenAPI, reviews) | ongoing |

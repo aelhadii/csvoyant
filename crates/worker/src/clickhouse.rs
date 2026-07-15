@@ -1,62 +1,40 @@
-//! A thin ClickHouse HTTP client. Every ingestion operation is a single SQL statement, so this
-//! wraps "POST SQL, get text back" with error classification.
+//! Worker-side ClickHouse access: wraps the shared HTTP client and classifies failures into
+//! retryable vs permanent ingestion errors with user-facing messages.
 
 use std::time::Duration;
 
-use shared::{Config, INGEST_TIMEOUT_SECS};
+use shared::{ChError, ChHttp, Config, INGEST_TIMEOUT_SECS};
 
 use crate::error::IngestError;
 
 #[derive(Clone)]
 pub struct ChClient {
-    http: reqwest::Client,
-    base: String,
-    user: String,
-    password: String,
-    pub database: String,
+    http: ChHttp,
 }
 
 impl ChClient {
     pub fn new(config: &Config) -> anyhow::Result<Self> {
-        // Allow the statement timeout (max_execution_time) to fire before the HTTP client does.
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(INGEST_TIMEOUT_SECS + 30))
-            .build()?;
-        Ok(Self {
-            http,
-            base: config.clickhouse_url.trim_end_matches('/').to_string(),
-            user: config.clickhouse_user.clone(),
-            password: config.clickhouse_password.clone(),
-            database: config.clickhouse_database.clone(),
-        })
+        // Let the SQL's max_execution_time fire before the HTTP client's timeout does.
+        let http = ChHttp::new(config, Duration::from_secs(INGEST_TIMEOUT_SECS + 30))?;
+        Ok(Self { http })
     }
 
     /// Execute a statement and return the response body.
     ///
     /// Classification note: ClickHouse returns **HTTP 500 for query exceptions too** (bad URL,
-    /// unparseable data, type mismatch), so status code alone can't tell transient from
-    /// permanent. A failure to *reach* ClickHouse is [`IngestError::Retryable`]; an error
-    /// *response* is classified by content — only a small set of clearly-transient signatures
-    /// (overload, memory, connection reset) retries; everything else is [`IngestError::Permanent`].
+    /// unparseable data, type mismatch), so status alone can't separate transient from
+    /// permanent. Failing to *reach* ClickHouse is retryable; an error *response* is classified
+    /// by content — only clearly-transient signatures retry, everything else is permanent.
     pub async fn run(&self, sql: &str) -> Result<String, IngestError> {
-        let response = self
-            .http
-            .post(&self.base)
-            .basic_auth(&self.user, Some(&self.password))
-            .query(&[("database", self.database.as_str())])
-            .body(sql.to_string())
-            .send()
-            .await
-            .map_err(|e| IngestError::Retryable(format!("clickhouse unreachable: {e}")))?;
-
-        let is_success = response.status().is_success();
-        let body = response.text().await.unwrap_or_default();
-        if is_success {
-            Ok(body)
-        } else if is_transient(&body) {
-            Err(IngestError::Retryable(clean_error(&body)))
-        } else {
-            Err(IngestError::Permanent(clean_error(&body)))
+        match self.http.run(sql).await {
+            Ok(body) => Ok(body),
+            Err(ChError::Unreachable(e)) => Err(IngestError::Retryable(format!(
+                "clickhouse unreachable: {e}"
+            ))),
+            Err(ChError::Query(body)) if is_transient(&body) => {
+                Err(IngestError::Retryable(clean_error(&body)))
+            }
+            Err(ChError::Query(body)) => Err(IngestError::Permanent(clean_error(&body))),
         }
     }
 }
@@ -108,7 +86,7 @@ fn clean_error(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::clean_error;
+    use super::{clean_error, is_transient};
 
     #[test]
     fn timeouts_map_to_a_friendly_reason() {
@@ -139,5 +117,13 @@ mod tests {
         let msg = clean_error("Code: 999. DB::Exception: something unusual happened");
         assert!(!msg.is_empty());
         assert!(msg.len() <= 200);
+    }
+
+    #[test]
+    fn data_errors_are_not_transient_but_overload_is() {
+        assert!(!is_transient(
+            "Code: 715. The data format cannot be detected"
+        ));
+        assert!(is_transient("Code: 202. TOO_MANY_SIMULTANEOUS_QUERIES"));
     }
 }
