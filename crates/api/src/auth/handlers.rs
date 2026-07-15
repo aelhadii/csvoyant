@@ -122,6 +122,36 @@ pub async fn refresh(
     Ok((jar, response::data(resp)))
 }
 
+/// POST /auth/logout — revoke the presented refresh token and clear the cookie.
+///
+/// Deliberately unauthenticated: the access token may already have expired, and the refresh
+/// cookie alone identifies the session to end. Idempotent — an unknown/absent token still
+/// clears the cookie and reports success.
+pub async fn logout(
+    State(auth): State<AuthState>,
+    jar: CookieJar,
+    body: Option<Json<RefreshRequest>>,
+) -> ApiResult<(CookieJar, JsonValue)> {
+    let presented = body
+        .and_then(|Json(b)| b.refresh_token)
+        .or_else(|| jar.get(REFRESH_COOKIE).map(|c| c.value().to_string()));
+
+    if let Some(token) = presented {
+        // Best-effort: a bogus token isn't an error, logging out must always succeed.
+        let _ = sqlx::query("UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1")
+            .bind(tokens::hash_token(&token))
+            .execute(&auth.pg)
+            .await;
+    }
+
+    // Path must match the cookie we set, or the browser won't drop it.
+    let jar = jar.remove(Cookie::build((REFRESH_COOKIE, "")).path("/").build());
+    Ok((
+        jar,
+        response::data(serde_json::json!({ "signed_out": true })),
+    ))
+}
+
 /// PATCH /auth/email — change the authenticated user's email (re-auth with current password).
 pub async fn change_email(
     State(auth): State<AuthState>,

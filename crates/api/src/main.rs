@@ -7,8 +7,10 @@ use api::auth;
 use api::jobs;
 use api::state::AppState;
 use axum::Router;
+use axum::http::{HeaderValue, Method, header};
 use axum::routing::get;
 use shared::Config;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -22,11 +24,27 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState::connect(&config).await?;
 
+    // The browser SPA is a different origin (port), so it needs CORS — and credentials must be
+    // allowed for the httpOnly refresh cookie to travel. A credentialed request cannot use `*`,
+    // so the allowed origin is explicit (see CORS_ALLOWED_ORIGIN).
+    let cors = CorsLayer::new()
+        .allow_origin(
+            config
+                .cors_allowed_origin
+                .parse::<HeaderValue>()
+                .map_err(|e| anyhow::anyhow!("invalid CORS_ALLOWED_ORIGIN: {e}"))?,
+        )
+        .allow_credentials(true)
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+    info!(origin = %config.cors_allowed_origin, "CORS configured");
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
         .merge(auth::auth_router())
         .merge(jobs::jobs_router())
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

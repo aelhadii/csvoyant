@@ -53,6 +53,7 @@ fn test_config() -> Config {
         amqp_url: "amqp://unused".into(),
         jwt_secret: "test-secret".into(),
         bind_addr: "0.0.0.0:0".into(),
+        cors_allowed_origin: "http://localhost:3000".into(),
         telemetry: TelemetryConfig {
             otlp_endpoint: String::new(),
             axiom_token: String::new(),
