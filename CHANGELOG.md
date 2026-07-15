@@ -4,6 +4,32 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 
 ## [Unreleased]
 
+### Prompt E — Frontend (#5)
+
+**Added**
+- Next.js (App Router) + TypeScript + Tailwind v4 + shadcn/ui frontend:
+  - **Auth** — register / sign in / change email. Access token kept **in memory only**, session
+    restored on load from the httpOnly refresh cookie; a 401 transparently rotates the token and
+    replays the request once. Protected routes redirect to `/login`.
+  - **Submit** — paste a data-file URL and start a job.
+  - **Jobs** — list with live status, polling only while a job is still in flight.
+  - **Dashboard** — summary cards, backend-suggested charts, per-column stats, and a sortable
+    server-paginated data table.
+  - **Admin** — all users' jobs, shown only to admins (the API is what enforces it).
+  - Loading / error / empty states throughout; toasts for submit + email change.
+- **CORS on the API** (`CORS_ALLOWED_ORIGIN`, default `http://localhost:3000`) — required for the
+  browser to call the API at all, with `allow_credentials` so the refresh cookie travels.
+
+**Chart palette** — shadcn ships a *grayscale* `--chart-*` ramp (zero chroma). Replaced with a
+palette validated by the dataviz validator in both modes (lightness band, chroma floor, CVD
+separation, normal-vision floor all PASS). Charts are single-series, so each uses one slot and
+carries no legend — the card title names the series.
+
+**Notes**
+- Dropped the `next/font` Google Fonts fetch for a system stack: it made the build depend on
+  network access and broke the Docker build.
+- shadcn now builds on Base UI, which uses `render={<Link/>}` rather than Radix's `asChild`.
+
 ### Prompt D — Dashboard generation + read APIs (#4)
 
 **Added**

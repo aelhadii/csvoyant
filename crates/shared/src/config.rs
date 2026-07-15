@@ -58,6 +58,8 @@ pub struct Config {
     pub jwt_secret: String,
     /// Host:port the HTTP server binds to.
     pub bind_addr: String,
+    /// Browser origin allowed to call the API with credentials (the frontend).
+    pub cors_allowed_origin: String,
     /// Telemetry export config.
     pub telemetry: TelemetryConfig,
 }
@@ -74,6 +76,7 @@ impl Config {
             amqp_url: required("AMQP_URL")?,
             jwt_secret: optional("JWT_SECRET", "dev-insecure-change-me"),
             bind_addr: optional("BIND_ADDR", "0.0.0.0:8080"),
+            cors_allowed_origin: optional("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
             telemetry: TelemetryConfig::from_env(),
         })
     }
