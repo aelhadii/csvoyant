@@ -14,6 +14,7 @@ use crate::auth::models::{
 };
 use crate::auth::{AuthState, REFRESH_COOKIE, jwt, password, tokens};
 use crate::error::{ApiResult, AppError};
+use crate::extract::ApiJson;
 use crate::response;
 
 type JsonValue = Json<serde_json::Value>;
@@ -30,7 +31,7 @@ static DUMMY_PASSWORD_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::n
 pub async fn register(
     State(auth): State<AuthState>,
     jar: CookieJar,
-    Json(req): Json<RegisterRequest>,
+    ApiJson(req): ApiJson<RegisterRequest>,
 ) -> ApiResult<(StatusCode, CookieJar, JsonValue)> {
     req.validate()?;
     let password_hash = password::hash_password(&req.password)?;
@@ -52,7 +53,7 @@ pub async fn register(
 pub async fn login(
     State(auth): State<AuthState>,
     jar: CookieJar,
-    Json(req): Json<LoginRequest>,
+    ApiJson(req): ApiJson<LoginRequest>,
 ) -> ApiResult<(CookieJar, JsonValue)> {
     req.validate()?;
 
@@ -125,7 +126,7 @@ pub async fn refresh(
 pub async fn change_email(
     State(auth): State<AuthState>,
     user: AuthUser,
-    Json(req): Json<ChangeEmailRequest>,
+    ApiJson(req): ApiJson<ChangeEmailRequest>,
 ) -> ApiResult<JsonValue> {
     req.validate()?;
 

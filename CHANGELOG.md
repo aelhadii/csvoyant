@@ -24,9 +24,19 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 **Tenancy** — every read handler goes through one `load_job_for_user` guard: Users see only
 their own jobs, Admins see all, and a cross-tenant read returns **404** (existence not leaked).
 
-**Tests** — 8 new integration tests proving cross-tenant denial across `/jobs/{id}`,
+**Tests** — 9 new integration tests proving cross-tenant denial across `/jobs/{id}`,
 `/dashboard`, `/data` and listing, admin override, unauthenticated rejection, plus data-endpoint
-validation (unknown sort/filter column, bad order, not-ready job). 45 tests total.
+validation (unknown sort/filter column, bad order, not-ready job) and envelope consistency.
+46 tests total.
+
+**Hardening (from code review)**
+- `data.total` now reflects the filter (a COUNT over the same predicate) instead of always
+  reporting the dataset's full row count — filtered pagination was wrong.
+- Custom `ApiJson`/`ApiQuery`/`ApiPath` extractors map axum's rejections to `AppError`, so a bad
+  path/query/body returns the `{data,error}` envelope rather than axum's plain text.
+- `GET /jobs/{id}/dashboard` requires the job to be `ready` (a job could otherwise serve a
+  dashboard left by an earlier successful attempt).
+- Deep pagination is refused above a max offset; JSONEachRow parsing deduplicated into `shared`.
 
 ### Prompt C — Ingestion pipeline (#3)
 

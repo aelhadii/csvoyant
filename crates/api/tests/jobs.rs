@@ -291,6 +291,32 @@ async fn unauthenticated_access_is_rejected(pool: PgPool) {
 // ── dashboard / data behaviour ───────────────────────────────────────────────
 
 #[sqlx::test]
+async fn malformed_requests_still_use_the_error_envelope(pool: PgPool) {
+    let app = app(pool.clone());
+    let (alice, alice_id) = register(&app, "alice@x.com").await;
+    let job = insert_ready_job(&pool, alice_id).await;
+
+    // An unparseable path segment must not escape as axum's plain-text rejection.
+    let (status, body) = call(&app, "GET", "/jobs/not-a-uuid", None, Some(&alice)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "bad_request");
+    assert!(body["data"].is_null());
+
+    // Nor must a query param of the wrong type.
+    let (status, body) = call(
+        &app,
+        "GET",
+        &format!("/jobs/{job}/data?page=abc"),
+        None,
+        Some(&alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "bad_request");
+    assert!(body["data"].is_null());
+}
+
+#[sqlx::test]
 async fn dashboard_is_404_until_it_is_generated(pool: PgPool) {
     let app = app(pool.clone());
     let (alice, alice_id) = register(&app, "alice@x.com").await;

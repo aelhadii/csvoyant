@@ -67,6 +67,14 @@ impl ChHttp {
     }
 }
 
+/// Parse a `FORMAT JSONEachRow` response body: one JSON object per line, blanks skipped.
+pub fn parse_json_lines(body: &str) -> Vec<serde_json::Value> {
+    body.lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
 /// Escape a backtick-quoted ClickHouse identifier.
 pub fn escape_ident(s: &str) -> String {
     s.replace('`', "``")
@@ -90,5 +98,13 @@ mod tests {
     fn string_literals_escape_quotes_and_backslashes() {
         assert_eq!(escape_sql_string("a'b"), "a\\'b");
         assert_eq!(escape_sql_string("a\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn json_each_row_parsing_skips_blanks_and_bad_lines() {
+        let rows = parse_json_lines("{\"a\":1}\n\n{\"a\":2}\nnot-json\n");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["a"], 1);
+        assert_eq!(rows[1]["a"], 2);
     }
 }

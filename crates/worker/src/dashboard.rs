@@ -3,8 +3,7 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use shared::INGEST_TIMESTAMP_COLUMN;
-use shared::clickhouse::escape_ident;
+use shared::clickhouse::{escape_ident, parse_json_lines};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -104,10 +103,7 @@ fn suggest_charts(columns: &[(String, String)]) -> Vec<(String, ColumnKind)> {
         ColumnKind::Numeric,
         ColumnKind::Categorical,
     ] {
-        if let Some((name, _)) = columns
-            .iter()
-            .find(|(n, t)| classify(t) == want && n != INGEST_TIMESTAMP_COLUMN)
-        {
+        if let Some((name, _)) = columns.iter().find(|(_, t)| classify(t) == want) {
             picks.push((name.clone(), want));
         }
     }
@@ -124,13 +120,6 @@ async fn top_values(ch: &ChClient, table: &str, column: &str) -> Result<Vec<Valu
         t = escape_ident(table),
     );
     Ok(parse_json_lines(&ch.run(&sql).await?))
-}
-
-fn parse_json_lines(body: &str) -> Vec<Value> {
-    body.lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
 }
 
 /// Build the dashboard config for a freshly-ingested table.
