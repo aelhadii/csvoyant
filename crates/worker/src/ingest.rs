@@ -2,6 +2,7 @@
 //! `url()` table function (DECISIONS #13) — ClickHouse fetches, parses, infers, and loads.
 
 use serde::Deserialize;
+use shared::clickhouse::{escape_ident, escape_sql_string};
 use shared::{
     DATA_RETENTION_DAYS, INGEST_TIMEOUT_SECS, INGEST_TIMESTAMP_COLUMN, JobMessage, JobStatus,
     dataset_table_name,
@@ -10,6 +11,7 @@ use sqlx::PgPool;
 use tracing::{Instrument, info, info_span};
 
 use crate::clickhouse::ChClient;
+use crate::dashboard;
 use crate::error::{IngestError, db_retryable};
 use crate::repo;
 
@@ -75,10 +77,24 @@ pub async fn run_job(ctx: &Context, msg: &JobMessage) -> Result<(), IngestError>
         .instrument(info_span!("insert"))
         .await?;
 
-    // Ready — record the row count and inferred schema.
     let row_count = count_rows(ctx, &table)
         .instrument(info_span!("count_rows"))
         .await?;
+
+    // Dashboard metadata, generated before we mark the job ready so `ready` always implies a
+    // dashboard exists (no window where the UI has a ready job but nothing to render).
+    let cols: Vec<(String, String)> = columns
+        .iter()
+        .map(|c| (c.name.clone(), c.r#type.clone()))
+        .collect();
+    let config = dashboard::generate(&ctx.ch, &table, &cols, row_count)
+        .instrument(info_span!("generate_dashboard"))
+        .await?;
+    dashboard::store(&ctx.pg, msg.job_id, msg.user_id, config)
+        .await
+        .map_err(db_retryable)?;
+
+    // Ready — record the row count and inferred schema.
     repo::mark_ready(
         &ctx.pg,
         msg.job_id,
@@ -156,16 +172,6 @@ fn schema_to_json(columns: &[DescribedColumn]) -> serde_json::Value {
             .map(|c| serde_json::json!({ "name": c.name, "type": c.r#type }))
             .collect::<Vec<_>>()
     })
-}
-
-/// Escape a value going inside a single-quoted SQL string literal (guards the source URL).
-fn escape_sql_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\'', "\\'")
-}
-
-/// Escape a backtick-quoted identifier.
-fn escape_ident(s: &str) -> String {
-    s.replace('`', "``")
 }
 
 #[cfg(test)]

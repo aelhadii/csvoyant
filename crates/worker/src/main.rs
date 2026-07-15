@@ -8,6 +8,7 @@
 
 mod clickhouse;
 mod consumer;
+mod dashboard;
 mod error;
 mod ingest;
 mod repo;

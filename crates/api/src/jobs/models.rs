@@ -20,7 +20,8 @@ pub struct CreateJobResponse {
     pub status: JobStatus,
 }
 
-/// A job row as stored in Postgres.
+/// A job row as stored in Postgres. `clickhouse_table` / `inferred_schema` are internal and are
+/// not exposed in [`JobResponse`]; the read endpoints use them to query the dataset.
 #[derive(Debug, sqlx::FromRow)]
 pub struct JobRow {
     pub id: Uuid,
@@ -29,6 +30,8 @@ pub struct JobRow {
     pub status: String,
     pub error: Option<String>,
     pub row_count: Option<i64>,
+    pub clickhouse_table: Option<String>,
+    pub inferred_schema: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
 }
@@ -61,5 +64,18 @@ impl From<JobRow> for JobResponse {
 }
 
 /// Columns selected for a [`JobRow`], kept in one place so every query stays consistent.
-pub const JOB_COLUMNS: &str =
-    "id, user_id, source_url, status, error, row_count, created_at, finished_at";
+pub const JOB_COLUMNS: &str = "id, user_id, source_url, status, error, row_count, \
+     clickhouse_table, inferred_schema, created_at, finished_at";
+
+/// Query parameters for the paginated data endpoint.
+#[derive(Debug, Deserialize)]
+pub struct DataQuery {
+    pub page: Option<u32>,
+    pub page_size: Option<u32>,
+    /// Column to sort by (must be a real column of the dataset).
+    pub sort: Option<String>,
+    /// `asc` (default) or `desc`.
+    pub order: Option<String>,
+    /// `column:substring` — case-insensitive contains match.
+    pub filter: Option<String>,
+}

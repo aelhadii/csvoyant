@@ -4,19 +4,27 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use shared::{JobMessage, JobStatus, Role};
+use serde_json::json;
+use shared::clickhouse::{escape_ident, escape_sql_string};
+use shared::{ChError, INGEST_TIMESTAMP_COLUMN, JobMessage, JobStatus, Role};
+use sqlx::PgPool;
 use uuid::Uuid;
 use validator::Validate;
 
 use crate::auth::guard::AuthUser;
 use crate::error::{ApiResult, AppError};
 use crate::jobs::JobsState;
-use crate::jobs::models::{CreateJobRequest, CreateJobResponse, JOB_COLUMNS, JobResponse, JobRow};
+use crate::jobs::models::{
+    CreateJobRequest, CreateJobResponse, DataQuery, JOB_COLUMNS, JobResponse, JobRow,
+};
 use crate::response;
 
 type JsonValue = Json<serde_json::Value>;
+
+const DEFAULT_PAGE_SIZE: u32 = 50;
+const MAX_PAGE_SIZE: u32 = 500;
 
 /// POST /jobs — validate the CSV URL, persist a queued job, and enqueue it.
 pub async fn create_job(
@@ -91,18 +99,155 @@ pub async fn get_job(
     user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult<JsonValue> {
+    let row = load_job_for_user(&jobs.pg, id, &user).await?;
+    Ok(response::data(JobResponse::from(row)))
+}
+
+/// GET /jobs/{id}/dashboard — the auto-generated dashboard config for a ready job.
+pub async fn get_dashboard(
+    State(jobs): State<JobsState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<JsonValue> {
+    let job = load_job_for_user(&jobs.pg, id, &user).await?;
+    let config: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT config FROM dashboards WHERE job_id = $1")
+            .bind(job.id)
+            .fetch_optional(&jobs.pg)
+            .await?;
+    config.map(response::data).ok_or_else(|| {
+        AppError::NotFound("dashboard is not available yet (job is not ready)".to_string())
+    })
+}
+
+/// GET /jobs/{id}/data — paginated / sortable / filterable rows from the job's dataset table.
+pub async fn get_data(
+    State(jobs): State<JobsState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+    Query(q): Query<DataQuery>,
+) -> ApiResult<JsonValue> {
+    let job = load_job_for_user(&jobs.pg, id, &user).await?;
+    if job.status != JobStatus::Ready.as_str() {
+        return Err(AppError::BadRequest(format!(
+            "job is not ready (status: {})",
+            job.status
+        )));
+    }
+    let table = job
+        .clickhouse_table
+        .clone()
+        .ok_or_else(|| AppError::NotFound("no dataset table for this job".to_string()))?;
+
+    // Only real columns may be sorted/filtered on — this is the injection guard for identifiers.
+    let allowed = schema_columns(&job);
+
+    let page = q.page.unwrap_or(1).max(1);
+    let page_size = q
+        .page_size
+        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .clamp(1, MAX_PAGE_SIZE);
+    let offset = u64::from(page - 1) * u64::from(page_size);
+
+    // Hide the synthetic TTL column from callers.
+    let mut sql = format!(
+        "SELECT * EXCEPT (`{ts}`) FROM `{t}`",
+        ts = escape_ident(INGEST_TIMESTAMP_COLUMN),
+        t = escape_ident(&table),
+    );
+
+    if let Some(filter) = q.filter.as_deref() {
+        let (column, needle) = filter
+            .split_once(':')
+            .ok_or_else(|| AppError::BadRequest("filter must be `column:value`".to_string()))?;
+        require_column(&allowed, column)?;
+        sql.push_str(&format!(
+            " WHERE positionCaseInsensitive(toString(`{}`), '{}') > 0",
+            escape_ident(column),
+            escape_sql_string(needle),
+        ));
+    }
+
+    if let Some(sort) = q.sort.as_deref() {
+        require_column(&allowed, sort)?;
+        let dir = match q
+            .order
+            .as_deref()
+            .unwrap_or("asc")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "asc" => "ASC",
+            "desc" => "DESC",
+            other => {
+                return Err(AppError::BadRequest(format!(
+                    "order must be `asc` or `desc` (got `{other}`)"
+                )));
+            }
+        };
+        sql.push_str(&format!(" ORDER BY `{}` {dir}", escape_ident(sort)));
+    }
+
+    sql.push_str(&format!(
+        " LIMIT {page_size} OFFSET {offset} \
+         SETTINGS output_format_json_quote_64bit_integers = 0 FORMAT JSONEachRow"
+    ));
+
+    let body = jobs.ch.run(&sql).await.map_err(ch_error)?;
+    let rows: Vec<serde_json::Value> = body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+
+    Ok(response::data(json!({
+        "rows": rows,
+        "page": page,
+        "page_size": page_size,
+        "total": job.row_count,
+    })))
+}
+
+/// Load a job enforcing tenancy: Users see only their own, Admins see all. A job owned by
+/// someone else is reported as 404 so its existence isn't leaked.
+async fn load_job_for_user(pg: &PgPool, id: Uuid, user: &AuthUser) -> ApiResult<JobRow> {
     let row = sqlx::query_as::<_, JobRow>(&format!(
         "SELECT {JOB_COLUMNS} FROM ingestion_jobs WHERE id = $1"
     ))
     .bind(id)
-    .fetch_optional(&jobs.pg)
+    .fetch_optional(pg)
     .await?;
 
-    let row = match row {
-        Some(r) if r.user_id == user.user_id || user.role.satisfies(Role::Admin) => r,
-        _ => return Err(AppError::NotFound("job not found".into())),
-    };
-    Ok(response::data(JobResponse::from(row)))
+    match row {
+        Some(r) if r.user_id == user.user_id || user.role.satisfies(Role::Admin) => Ok(r),
+        _ => Err(AppError::NotFound("job not found".to_string())),
+    }
+}
+
+/// Column names from the job's stored inferred schema.
+fn schema_columns(job: &JobRow) -> Vec<String> {
+    job.inferred_schema
+        .as_ref()
+        .and_then(|s| s.get("columns"))
+        .and_then(|c| c.as_array())
+        .map(|cols| {
+            cols.iter()
+                .filter_map(|c| Some(c.get("name")?.as_str()?.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn require_column(allowed: &[String], name: &str) -> ApiResult<()> {
+    if allowed.iter().any(|c| c == name) {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(format!("unknown column: `{name}`")))
+    }
+}
+
+fn ch_error(e: ChError) -> AppError {
+    AppError::Internal(anyhow::anyhow!("clickhouse query failed: {e}"))
 }
 
 /// Validate a submitted data-file URL: scheme, reachability, size, and (if advertised) that it

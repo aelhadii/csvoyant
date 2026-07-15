@@ -76,6 +76,7 @@ impl AppState {
         let jobs = JobsState {
             pg: pg.clone(),
             relay_notify,
+            ch: shared::ChHttp::new(config, PROBE_TIMEOUT * 10)?,
         };
 
         Ok(Self {

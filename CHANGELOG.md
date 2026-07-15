@@ -4,6 +4,30 @@ All notable changes to CSVoyant are documented here. One entry per merged prompt
 
 ## [Unreleased]
 
+### Prompt D — Dashboard generation + read APIs (#4)
+
+**Added**
+- **Dashboard generation** (worker, on ingest): summary (row/column count), per-column
+  aggregations from ClickHouse in a single round-trip (nulls/distinct for every column;
+  min/max/avg for numeric; min/max for temporal), and suggested charts by column kind
+  (categorical→`bar` with top values, numeric→`histogram`, datetime→`time_series`). Generated
+  *before* the job is marked `ready`, so `ready` always implies a dashboard exists.
+- `GET /jobs/{id}/dashboard` — the stored dashboard config.
+- `GET /jobs/{id}/data?page=&page_size=&sort=&order=&filter=` — paginated / sortable /
+  filterable rows straight from ClickHouse. `sort`/`filter` columns are validated against the
+  job's inferred schema (identifier-injection guard); the synthetic TTL column is hidden via
+  `SELECT * EXCEPT`.
+- Migration `0005_dashboards` (one dashboard per job, upserted).
+- ClickHouse HTTP client moved to `shared` (`ChHttp`) and reused by the API and worker; the
+  worker keeps its retryable/permanent error classification on top.
+
+**Tenancy** — every read handler goes through one `load_job_for_user` guard: Users see only
+their own jobs, Admins see all, and a cross-tenant read returns **404** (existence not leaked).
+
+**Tests** — 8 new integration tests proving cross-tenant denial across `/jobs/{id}`,
+`/dashboard`, `/data` and listing, admin override, unauthenticated rejection, plus data-endpoint
+validation (unknown sort/filter column, bad order, not-ready job). 45 tests total.
+
 ### Prompt C — Ingestion pipeline (#3)
 
 **Added**
