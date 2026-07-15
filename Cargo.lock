@@ -119,6 +119,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "url",
  "uuid",
  "validator",
 ]
@@ -2905,6 +2906,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "lapin",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -4130,7 +4132,6 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
- "clickhouse",
  "dotenvy",
  "futures-util",
  "lapin",

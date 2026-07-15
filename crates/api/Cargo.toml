@@ -34,6 +34,7 @@ rand.workspace = true
 sha2.workspace = true
 hex.workspace = true
 time.workspace = true
+url = "2"
 dotenvy = "0.15"
 
 [dev-dependencies]

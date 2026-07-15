@@ -56,7 +56,7 @@ impl IntoResponse for AppError {
         let (status, code, message) = self.parts();
         (
             status,
-            Json(json!({ "error": { "code": code, "message": message } })),
+            Json(json!({ "data": null, "error": { "code": code, "message": message } })),
         )
             .into_response()
     }

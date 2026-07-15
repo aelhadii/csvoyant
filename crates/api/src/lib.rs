@@ -5,6 +5,8 @@
 
 pub mod auth;
 pub mod error;
+pub mod jobs;
+pub mod response;
 pub mod state;
 
 use std::time::Duration;
